@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Depth & Refraction Web Tool</title>
+    <style>
+        body { 
+            margin: 0px; 
+            overflow: hidden; 
+            background: #000000; 
+            font-family: sans-serif; 
+            font-size: 14px;
+        }
+        video { 
+            display: none; 
+        }
+        #ui { 
+            position: absolute; 
+            bottom: 20px; 
+            left: 20px; 
+            z-index: 10; 
+            display: flex; 
+            gap: 10px; 
+            flex-wrap: wrap;
+            max-width: 800px;
+        }
+        button { 
+            padding: 12px 20px; 
+            cursor: pointer; 
+            background: #222222; 
+            color: #ffffff; 
+            border: 1px solid #444444; 
+            font-size: 14px;
+            border-radius: 4px;
+        }
+        button:hover {
+            background: #444444;
+        }
+        #status { 
+            position: absolute; 
+            top: 20px; 
+            left: 20px; 
+            color: #ffffff; 
+            z-index: 10; 
+            font-size: 14px;
+        }
+    </style>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+</head>
+<body>
+    <div id="status">Downloading ML Depth Model (approx. 90mb)...</div>
+    <video id="video" autoplay playsinline muted></video>
+    
+    <div id="ui">
+        <button onclick="setMode(0)">Thermal Depth</button>
+        <button onclick="setMode(1)">Refract: Fluted Glass</button>
+        <button onclick="setMode(2)">Refract: Wave Ripples</button>
+        <button onclick="setMode(3)">Refract: Pixel Mosaic</button>
+        <button onclick="setMode(4)">No Filter (Base Camera)</button>
+    </div>
+
+    <script type="module">
+        import { pipeline, env } from 'https://cdn.jsdelivr.net/npm/@huggingface/transformers';
+        
+        env.allowLocalModels = false;
+
+        const video = document.getElementById('video');
+        const status = document.getElementById('status');
+        
+        const scene = new THREE.Scene();
+        const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+        const renderer = new THREE.WebGLRenderer({ antialias: false });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        document.body.appendChild(renderer.domElement);
+
+        const videoTexture = new THREE.VideoTexture(video);
+        let depthTexture = new THREE.CanvasTexture(document.createElement('canvas'));
+        
+        const material = new THREE.ShaderMaterial({
+            uniforms: {
+                tDiffuse: { value: videoTexture },
+                tDepth: { value: depthTexture },
+                uMode: { value: 1.0 }, // Default to Fluted Glass
+                uTime: { value: 0.0 }
+            },
+            vertexShader: `
+                varying vec2 vUv;
+                void main() {
+                    vUv = uv;
+                    gl_Position = vec4(position, 1.0);
+                }
+            `,
+            fragmentShader: `
+                uniform sampler2D tDiffuse;
+                uniform sampler2D tDepth;
+                uniform float uMode;
+                uniform float uTime;
+                varying vec2 vUv;
+
+                vec4 thermalGradient(float t) {
+                    vec3 blue = vec3(0.0, 0.0, 1.0);
+                    vec3 red = vec3(1.0, 0.0, 0.0);
+                    vec3 yellow = vec3(1.0, 1.0, 0.0);
+                    vec3 color = mix(blue, red, smoothstep(0.0, 0.5, t));
+                    color = mix(color, yellow, smoothstep(0.5, 1.0, t));
+                    return vec4(color, 1.0);
+                }
+
+                void main() {
+                    if (uMode < 0.5) {
+                        // 0: Thermal Depth
+                        float depth = texture2D(tDepth, vUv).r;
+                        gl_FragColor = thermalGradient(depth);
+                    } else {
+                        vec2 refractedUv = vUv;
+                        vec4 tint = vec4(0.0);
+
+                        if (uMode < 1.5) {
+                            // 1: Fluted Glass Refraction
+                            float columns = 25.0;
+                            float columnId = floor(vUv.x * columns);
+                            refractedUv = vec2(vUv.x, vUv.y + (columnId * 0.025) + sin(uTime * 2.0) * 0.01);
+                            tint = vec4(0.2, 0.4, 0.9, 1.0) * vUv.y * 0.5;
+                        } 
+                        else if (uMode < 2.5) {
+                            // 2: Wave/Ripple Refraction
+                            refractedUv = vec2(
+                                vUv.x + sin(vUv.y * 15.0 + uTime * 3.0) * 0.03, 
+                                vUv.y + cos(vUv.x * 15.0 + uTime * 2.0) * 0.03
+                            );
+                            tint = vec4(0.8, 0.2, 0.6, 1.0) * vUv.x * 0.3;
+                        }
+                        else if (uMode < 3.5) {
+                            // 3: Pixel Mosaic Refraction
+                            float pixels = 40.0;
+                            refractedUv = floor(vUv * pixels) / pixels;
+                            tint = vec4(0.1, 0.8, 0.5, 1.0) * 0.2;
+                        }
+                        // 4: Base Camera leaves refractedUv as vUv with no tint
+
+                        vec4 baseColor = texture2D(tDiffuse, refractedUv);
+                        gl_FragColor = baseColor + tint;
+                    }
+                }
+            `
+        });
+
+        scene.add(new THREE.Mesh(new THREE.PlaneGeometry(2, 2), material));
+
+        navigator.mediaDevices.getUserMedia({ video: { facingMode: "user" } })
+            .then(stream => { video.srcObject = stream; })
+            .catch(err => console.error("Camera access denied", err));
+
+        window.setMode = (mode) => { material.uniforms.uMode.value = mode; };
+        
+        const clock = new THREE.Clock();
+        const canvas = document.createElement('canvas');
+        canvas.width = 256; 
+        canvas.height = 256;
+        const ctx = canvas.getContext('2d');
+        
+        async function initML() {
+            // Using updated ONNX DepthAnything v2 mapped for browser pipelines
+            const estimator = await pipeline('depth-estimation', 'onnx-community/depth-anything-v2-small-ONNX');
+            status.innerText = "Model Active. Ready.";
+            
+            async function processFrame() {
+                if (video.readyState === video.HAVE_ENOUGH_DATA && material.uniforms.uMode.value === 0.0) {
+                    ctx.drawImage(video, 0, 0, 256, 256);
+                    const dataUrl = canvas.toDataURL('image/jpeg');
+                    
+                    try {
+                        const output = await estimator(dataUrl);
+                        depthTexture = new THREE.CanvasTexture(output.depth.toCanvas());
+                        material.uniforms.tDepth.value = depthTexture;
+                    } catch (e) {
+                        console.error("Depth estimation error:", e);
+                    }
+                }
+                
+                material.uniforms.uTime.value = clock.getElapsedTime();
+                renderer.render(scene, camera);
+                
+                requestAnimationFrame(processFrame);
+            }
+            processFrame();
+        }
+
+        initML();
+
+        window.addEventListener('resize', () => {
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+    </script>
+</body>
+</html>
