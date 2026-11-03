@@ -1,325 +1,968 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Depth & Refraction Web Tool</title>
-    <style>
-        body {
-            margin: 0;
-            overflow: hidden;
-            background: #000000;
-            font-family: sans-serif;
-            font-size: 14px;
-        }
-        canvas { display: block; }
-        video { display: none; }
-        #ui {
-            position: absolute;
-            bottom: 20px;
-            left: 20px;
-            right: 20px;
-            z-index: 10;
-            display: flex;
-            gap: 10px;
-            flex-wrap: wrap;
-            max-width: 800px;
-        }
-        button {
-            padding: 12px 20px;
-            cursor: pointer;
-            background: #222222;
-            color: #ffffff;
-            border: 1px solid #444444;
-            font-size: 14px;
-            border-radius: 4px;
-        }
-        button:hover { background: #444444; }
-        button.active { background: #ffffff; color: #000000; border-color: #ffffff; }
-        button:disabled { opacity: 0.4; cursor: wait; }
-        #status {
-            position: absolute;
-            top: 20px;
-            left: 20px;
-            right: 20px;
-            color: #ffffff;
-            z-index: 10;
-            font-size: 14px;
-            text-shadow: 0 1px 3px #000000;
-        }
-        #status.error { color: #ff6b6b; }
-    </style>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Heatmap Vision — Depth Tool</title>
+<style>
+  :root {
+    --bg: #0a0a0b; --panel: #131315; --field: #1c1c1f; --line: #26262b;
+    --text: #ececef; --muted: #8b8b94; --accent: #ff5a1f;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
+    font: 13px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  body { display: flex; overflow: hidden; }
+
+  #stage { flex: 1; min-width: 0; position: relative; display: flex; align-items: center;
+    justify-content: center; background: #000; }
+  #stage canvas { display: block; }
+  #status { position: absolute; top: 14px; left: 14px; right: 14px; font-size: 12px;
+    text-shadow: 0 1px 3px #000; pointer-events: none; white-space: pre-line; }
+  #status.error { color: #ff8080; }
+  #drop { position: absolute; inset: 12px; border: 2px dashed var(--accent); border-radius: 8px;
+    display: none; align-items: center; justify-content: center; font-size: 15px;
+    background: rgba(0,0,0,.65); pointer-events: none; }
+  #stage.dragging #drop { display: flex; }
+
+  #panel { width: 320px; flex: none; background: var(--panel); border-left: 1px solid var(--line);
+    overflow-y: auto; padding: 16px 16px 48px; }
+  h1 { font-size: 14px; margin: 0; letter-spacing: .02em; }
+  .sub { color: var(--muted); font-size: 11px; margin: 2px 0 12px; }
+  section { border-top: 1px solid var(--line); padding: 12px 0 6px; }
+  h2 { font-size: 10.5px; text-transform: uppercase; letter-spacing: .12em; color: var(--muted);
+    margin: 0 0 10px; font-weight: 600; }
+  .row { display: flex; gap: 6px; margin-bottom: 8px; }
+  .row > * { flex: 1; }
+  button, select { font: inherit; color: var(--text); background: var(--field);
+    border: 1px solid var(--line); border-radius: 6px; padding: 7px 9px; cursor: pointer; }
+  button:hover:not(:disabled) { border-color: #3d3d44; }
+  button:disabled { opacity: .4; cursor: default; }
+  button.on { background: var(--text); color: #000; border-color: var(--text); }
+  button.rec { background: #c62828; border-color: #c62828; color: #fff; }
+  select { width: 100%; }
+  .seg { display: flex; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; margin-bottom: 10px; }
+  .seg button { flex: 1; border: 0; border-radius: 0; padding: 7px 4px; background: transparent; }
+  .seg button + button { border-left: 1px solid var(--line); }
+  .seg button.on { background: var(--text); color: #000; }
+  .ctl { margin-bottom: 10px; }
+  .ctl label { display: flex; justify-content: space-between; font-size: 12px; margin-bottom: 3px; }
+  .ctl label span { color: var(--muted); font-variant-numeric: tabular-nums; }
+  input[type=range] { width: 100%; margin: 0; accent-color: var(--accent); }
+  .check { display: flex; align-items: center; gap: 8px; margin-bottom: 9px; font-size: 12px; cursor: pointer; }
+  .check input { accent-color: var(--accent); margin: 0; }
+  .hint { font-size: 11px; color: var(--muted); margin: -4px 0 10px; }
+  .info { font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; margin-bottom: 8px; }
+  .lbl { font-size: 12px; margin-bottom: 4px; }
+
+  .grad { height: 26px; border-radius: 5px; border: 1px solid var(--line); cursor: copy; margin-top: 8px; }
+  .stops { position: relative; height: 20px; margin: 2px 6px 8px; }
+  .stop { position: absolute; top: 2px; width: 12px; height: 16px; margin-left: -6px; border: 2px solid #fff;
+    border-radius: 3px; cursor: grab; box-shadow: 0 0 0 1px #000; touch-action: none; }
+  .stop.sel { border-color: var(--accent); box-shadow: 0 0 0 1px #000, 0 0 0 3px rgba(255,90,31,.35); }
+  .stopedit { display: flex; gap: 6px; align-items: stretch; }
+  .stopedit > button { flex: 1; }
+  input[type=color] { width: 44px; height: 33px; padding: 2px; border: 1px solid var(--line);
+    border-radius: 6px; background: var(--field); cursor: pointer; }
+
+  [hidden] { display: none !important; }
+
+  @media (max-width: 760px) {
+    body { flex-direction: column; }
+    #panel { width: auto; height: 48vh; border-left: 0; border-top: 1px solid var(--line); }
+  }
+</style>
 </head>
 <body>
-    <div id="status">Starting camera…</div>
-    <video id="video" autoplay playsinline muted></video>
+  <div id="stage">
+    <div id="status">Loading…</div>
+    <div id="drop">Drop image or video</div>
+  </div>
 
-    <div id="ui">
-        <button data-mode="0" disabled>Thermal Depth</button>
-        <button data-mode="1">Refract: Fluted Glass</button>
-        <button data-mode="2">Refract: Wave Ripples</button>
-        <button data-mode="3">Refract: Pixel Mosaic</button>
-        <button data-mode="4">No Filter (Base Camera)</button>
-    </div>
+  <aside id="panel">
+    <h1>Heatmap Vision</h1>
+    <div class="sub">Z-depth from camera, video, images or depth sensors</div>
 
-    <script type="module">
-        // transformers.js is imported lazily in loadEstimator(), so the camera and
-        // refraction modes keep working even if the ML library or model fails to load.
-        // Pinned: the unversioned URL now resolves to whatever is latest.
-        const TRANSFORMERS_URL = 'https://cdn.jsdelivr.net/npm/@huggingface/transformers@4.3.2';
-        let RawImage = null;
+    <section>
+      <h2>Source</h2>
+      <div class="row">
+        <button id="btnCam">Webcam</button>
+        <button id="btnSensor" title="Intel RealSense, Orbbec, Kinect and similar USB depth cameras (Chrome)">Depth sensor</button>
+      </div>
+      <select id="camSelect" title="Camera" hidden></select>
+      <div class="row" style="margin-top:8px">
+        <button id="btnFile">Open image / video</button>
+        <button id="btnDepthFile" title="Load an existing depth map (e.g. iPhone LiDAR export) and colourise it">Open depth map</button>
+      </div>
+      <input id="file" type="file" accept="image/*,video/*" hidden>
+      <div class="row">
+        <button id="btnPause" hidden>Pause</button>
+      </div>
+      <label class="check"><input type="checkbox" id="mirror"> Mirror</label>
+      <div class="info" id="sourceInfo">No source</div>
+    </section>
 
-        const MODEL_ID = 'onnx-community/depth-anything-v2-small-ONNX';
-        const DEPTH_SIZE = 256;
+    <section>
+      <h2>View</h2>
+      <div class="seg" id="viewSeg">
+        <button data-view="0">Gradient</button>
+        <button data-view="1">Depth</button>
+        <button data-view="2">Source</button>
+        <button data-view="3">Split</button>
+      </div>
+      <div class="ctl" data-show-view="0"><label>Gradient opacity <span></span></label>
+        <input type="range" data-key="mix" min="0" max="1" step="0.01"></div>
+      <div class="ctl" data-show-view="3"><label>Split position <span></span></label>
+        <input type="range" data-key="split" min="0" max="1" step="0.001"></div>
+    </section>
 
-        const video = document.getElementById('video');
-        const status = document.getElementById('status');
-        const buttons = [...document.querySelectorAll('#ui button')];
-        const thermalButton = buttons.find(b => b.dataset.mode === '0');
+    <section id="secModel">
+      <h2>Depth model &amp; quality</h2>
+      <div class="lbl">Model</div>
+      <select id="model" style="margin-bottom:10px">
+        <option value="small">Depth Anything V2 Small — fast (~27 MB)</option>
+        <option value="base">Depth Anything V2 Base — more detail (~100 MB)</option>
+      </select>
+      <div class="ctl"><label>Model resolution <span></span></label>
+        <input type="range" data-key="res" min="196" max="728" step="14"></div>
+      <div class="hint">Higher = finer edges, slower. 518 is the model's native size.</div>
+      <div class="lbl">Backend</div>
+      <select id="backend" style="margin-bottom:8px">
+        <option value="auto">Auto (WebGPU, fall back to WASM)</option>
+        <option value="webgpu">WebGPU</option>
+        <option value="wasm">WASM (CPU)</option>
+      </select>
+      <div class="info" id="modelInfo">—</div>
+    </section>
 
-        function setStatus(text, isError = false) {
-            status.textContent = text;
-            status.classList.toggle('error', isError);
+    <section id="secSensor" hidden>
+      <h2>Sensor range</h2>
+      <div class="ctl"><label>Near (m) <span></span></label>
+        <input type="range" data-key="sNear" min="0.1" max="5" step="0.01"></div>
+      <div class="ctl"><label>Far (m) <span></span></label>
+        <input type="range" data-key="sFar" min="0.3" max="12" step="0.01"></div>
+      <div class="lbl">Depth units</div>
+      <select id="sUnits" style="margin-bottom:8px">
+        <option value="1">1 mm (RealSense D4xx, Kinect, Orbbec)</option>
+        <option value="0.25">0.25 mm (RealSense L515)</option>
+        <option value="0.1">0.1 mm</option>
+      </select>
+      <div class="hint">Pixels without a reading are shown black.</div>
+    </section>
+
+    <section>
+      <h2>Depth range</h2>
+      <label class="check" id="autoWrap"><input type="checkbox" data-key="auto"> Auto range</label>
+      <div class="hint" id="autoHint">Off locks the current range — stops colours pulsing on video.</div>
+      <div class="ctl"><label>Far clip <span></span></label>
+        <input type="range" data-key="far" min="0" max="1" step="0.001"></div>
+      <div class="ctl"><label>Near clip <span></span></label>
+        <input type="range" data-key="near" min="0" max="1" step="0.001"></div>
+      <div class="ctl"><label>Gamma <span></span></label>
+        <input type="range" data-key="gamma" min="0.2" max="4" step="0.01"></div>
+      <label class="check"><input type="checkbox" data-key="invert"> Invert (white = far)</label>
+      <div class="ctl" id="smoothCtl"><label>Temporal smoothing <span></span></label>
+        <input type="range" data-key="smooth" min="0" max="0.95" step="0.01"></div>
+      <div class="ctl"><label>Edge softening <span></span></label>
+        <input type="range" data-key="blur" min="0" max="6" step="0.1"></div>
+    </section>
+
+    <section>
+      <h2>Stylize</h2>
+      <div class="ctl"><label>Posterize steps <span></span></label>
+        <input type="range" data-key="steps" min="0" max="32" step="1"></div>
+      <div class="ctl"><label>Contour lines <span></span></label>
+        <input type="range" data-key="contours" min="0" max="80" step="1"></div>
+      <div class="ctl"><label>Contour opacity <span></span></label>
+        <input type="range" data-key="contourOpacity" min="0" max="1" step="0.01"></div>
+    </section>
+
+    <section>
+      <h2>Gradient</h2>
+      <select id="preset"></select>
+      <div class="grad" id="gradBar" title="Click to add a colour stop"></div>
+      <div class="stops" id="stops"></div>
+      <div class="stopedit">
+        <input type="color" id="stopColor" title="Selected stop colour">
+        <button id="btnDelStop">Delete stop</button>
+        <button id="btnReverse">Reverse</button>
+      </div>
+      <div class="hint" style="margin-top:8px">Left = far, right = near. Drag stops to move them.</div>
+    </section>
+
+    <section>
+      <h2>Export</h2>
+      <div class="row"><button id="btnPng">Save PNG</button><button id="btnRec">Record video</button></div>
+      <div class="row"><button id="btnDepth16">Save 16-bit depth PNG</button></div>
+      <div class="hint">16-bit depth is clean grayscale (range, gamma and invert applied) — for Blender displacement, Defocus or Mist.</div>
+    </section>
+  </aside>
+
+<script type="module">
+import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js';
+
+// transformers.js is imported lazily so sources, sensors and gradients work without it.
+const TRANSFORMERS_URL = 'https://cdn.jsdelivr.net/npm/@huggingface/transformers@4.3.2';
+const MODELS = {
+  small: 'onnx-community/depth-anything-v2-small-ONNX',
+  base: 'onnx-community/depth-anything-v2-base-ONNX'
+};
+
+// ---------------------------------------------------------------- presets
+const PRESETS = {
+  thermal: { label: 'Thermal (iron)', stops: [[0,'#00000f'],[0.2,'#3b0a6e'],[0.4,'#a3157d'],[0.6,'#e6461f'],[0.8,'#f9a20f'],[1,'#ffffd0']] },
+  turbo:   { label: 'Turbo', stops: [[0,'#30123b'],[0.13,'#4454c4'],[0.25,'#4490fe'],[0.38,'#1fc8de'],[0.5,'#29efa2'],[0.63,'#7dff56'],[0.75,'#c1f334'],[0.85,'#f9ba38'],[0.93,'#f66b19'],[1,'#7a0403']] },
+  inferno: { label: 'Inferno', stops: [[0,'#000004'],[0.2,'#320a5e'],[0.4,'#781c6d'],[0.6,'#bc3754'],[0.8,'#ed6925'],[0.9,'#fbb61a'],[1,'#fcffa4']] },
+  magma:   { label: 'Magma', stops: [[0,'#000004'],[0.2,'#2c115f'],[0.4,'#721f81'],[0.6,'#b73779'],[0.8,'#f1605d'],[0.9,'#feb078'],[1,'#fcfdbf']] },
+  plasma:  { label: 'Plasma', stops: [[0,'#0d0887'],[0.25,'#7e03a8'],[0.5,'#cc4778'],[0.75,'#f89540'],[1,'#f0f921']] },
+  viridis: { label: 'Viridis', stops: [[0,'#440154'],[0.25,'#3b528b'],[0.5,'#21918c'],[0.75,'#5ec962'],[1,'#fde725']] },
+  heat:    { label: 'Classic heat', stops: [[0,'#0000ff'],[0.5,'#ff0000'],[1,'#ffff00']] },
+  ice:     { label: 'Ice', stops: [[0,'#000000'],[0.4,'#0b3d91'],[0.75,'#5ec8f2'],[1,'#ffffff']] },
+  gray:    { label: 'Grayscale', stops: [[0,'#000000'],[1,'#ffffff']] },
+  custom:  { label: 'Custom', stops: null }
+};
+
+// ---------------------------------------------------------------- settings
+const DEFAULTS = {
+  view: 0, mix: 1, split: 0.5,
+  model: 'small', res: 364, backend: 'auto',
+  auto: true, far: 0, near: 1, gamma: 1, invert: false, smooth: 0.5, blur: 0,
+  steps: 0, contours: 0, contourOpacity: 0.6,
+  preset: 'thermal', customStops: [[0,'#000000'],[1,'#ffffff']],
+  sNear: 0.3, sFar: 3, sUnits: 1
+};
+const S = { ...DEFAULTS, mirror: true };
+try { Object.assign(S, JSON.parse(localStorage.getItem('heatmapvision') || '{}')); } catch {}
+let saveTimer = 0;
+function save() {
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(() => {
+    try { const { mirror, ...rest } = S; localStorage.setItem('heatmapvision', JSON.stringify(rest)); } catch {}
+  }, 300);
+}
+
+const $ = (id) => document.getElementById(id);
+const stage = $('stage');
+const statusEl = $('status');
+function setStatus(text, isError = false) {
+  statusEl.textContent = text;
+  statusEl.classList.toggle('error', isError);
+}
+const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+
+// ---------------------------------------------------------------- renderer
+const renderer = new THREE.WebGLRenderer({ antialias: false, alpha: false });
+renderer.setPixelRatio(1);
+renderer.setSize(640, 360, false);
+stage.appendChild(renderer.domElement);
+const gl = renderer.getContext();
+const floatLinear = renderer.extensions.has('OES_texture_float_linear');
+const floatTarget = renderer.extensions.has('EXT_color_buffer_float');
+
+const scene = new THREE.Scene();
+const cam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+
+function makeTex(t) {
+  t.minFilter = THREE.LinearFilter; t.magFilter = THREE.LinearFilter;
+  t.generateMipmaps = false; t.wrapS = t.wrapT = THREE.ClampToEdgeWrapping;
+  return t;
+}
+
+// Gradient lookup table (256×1)
+const lutCanvas = document.createElement('canvas');
+lutCanvas.width = 256; lutCanvas.height = 1;
+const lutCtx = lutCanvas.getContext('2d', { willReadFrequently: true });
+const lutTex = makeTex(new THREE.CanvasTexture(lutCanvas));
+
+const blankTex = makeTex(new THREE.DataTexture(new Uint8Array([0, 0, 0, 255]), 1, 1));
+blankTex.needsUpdate = true;
+
+const uniforms = {
+  tSource: { value: blankTex }, tDepth: { value: blankTex }, tSensor: { value: blankTex }, tLut: { value: lutTex },
+  uDepthMode: { value: 0 },     // 0 = AI estimate, 1 = sensor (metric), 2 = loaded depth map
+  uHasDepth: { value: 0 }, uView: { value: 0 }, uOutput: { value: 0 },
+  uMirror: { value: 0 }, uMix: { value: 1 }, uSplit: { value: 0.5 },
+  uInvert: { value: 0 }, uNear: { value: 1 }, uFar: { value: 0 }, uGamma: { value: 1 },
+  uSteps: { value: 0 }, uBlur: { value: 0 }, uContours: { value: 0 }, uContourOpacity: { value: 0.6 },
+  uDepthTexel: { value: new THREE.Vector2(1 / 256, 1 / 256) },
+  uSensorScale: { value: 65.535 }, uSensorNear: { value: 0.3 }, uSensorFar: { value: 3 }
+};
+
+const material = new THREE.ShaderMaterial({
+  uniforms,
+  vertexShader: /* glsl */`
+    varying vec2 vUv;
+    void main() { vUv = uv; gl_Position = vec4(position, 1.0); }`,
+  fragmentShader: /* glsl */`
+    uniform sampler2D tSource, tDepth, tSensor, tLut;
+    uniform float uDepthMode, uHasDepth, uView, uOutput, uMirror, uMix, uSplit;
+    uniform float uInvert, uNear, uFar, uGamma, uSteps, uBlur, uContours, uContourOpacity;
+    uniform vec2 uDepthTexel;
+    uniform float uSensorScale, uSensorNear, uSensorFar;
+    varying vec2 vUv;
+
+    // Returns depth in 0..1 with 1 = near, or -1 for "no reading".
+    float sampleDepth(vec2 uv) {
+      if (uDepthMode < 0.5) return texture2D(tDepth, uv).r;
+      if (uDepthMode < 1.5) {
+        float m = texture2D(tSensor, uv).r * uSensorScale;   // metres
+        if (m <= 0.0005) return -1.0;
+        return 1.0 - clamp((m - uSensorNear) / max(uSensorFar - uSensorNear, 1e-4), 0.0, 1.0);
+      }
+      return texture2D(tSource, uv).r;                          // loaded depth map (white = near)
+    }
+
+    float depthAt(vec2 uv) {
+      if (uBlur < 0.05) return sampleDepth(uv);
+      float sum = 0.0, w = 0.0;
+      for (int x = -2; x <= 2; x++) for (int y = -2; y <= 2; y++) {
+        vec2 o = vec2(float(x), float(y)) * uDepthTexel * uBlur * 0.5;
+        float d = sampleDepth(uv + o);
+        float k = exp(-float(x * x + y * y) / 4.0);
+        if (d >= 0.0) { sum += d * k; w += k; }
+      }
+      return w > 0.0 ? sum / w : -1.0;
+    }
+
+    float shape(float d) {
+      if (uInvert > 0.5) d = 1.0 - d;
+      d = clamp((d - uFar) / max(uNear - uFar, 1e-4), 0.0, 1.0);
+      return pow(d, uGamma);
+    }
+
+    void main() {
+      vec2 uv = vUv;
+      if (uMirror > 0.5) uv.x = 1.0 - uv.x;
+      vec3 src = texture2D(tSource, uv).rgb;
+      if (uDepthMode > 1.5) src = vec3(src.r);
+
+      if (uOutput > 0.5) {                     // 16-bit export pass: clean shaped depth
+        float d = depthAt(uv);
+        gl_FragColor = vec4(d < 0.0 ? 0.0 : shape(d), 0.0, 0.0, 1.0);
+        return;
+      }
+
+      bool showSource = uView > 1.5 && uView < 2.5;
+      if (showSource || uHasDepth < 0.5) {
+        gl_FragColor = vec4(src * (showSource ? 1.0 : 0.45), 1.0);
+        return;
+      }
+
+      float raw = depthAt(uv);
+      vec3 col;
+      if (raw < 0.0) {
+        col = vec3(0.0);
+      } else {
+        float d = shape(raw);
+        float dq = d;
+        if (uSteps > 1.5) dq = min(floor(d * uSteps), uSteps - 1.0) / (uSteps - 1.0);
+        col = (uView > 0.5 && uView < 1.5) ? vec3(dq) : texture2D(tLut, vec2(dq * (255.0 / 256.0) + 0.5 / 256.0, 0.5)).rgb;
+        if (uContours > 0.5) {
+          float f = d * uContours;
+          float line = 1.0 - clamp(abs(fract(f - 0.5) - 0.5) / max(fwidth(f), 1e-4), 0.0, 1.0);
+          col = mix(col, vec3(1.0), line * uContourOpacity);
         }
+      }
 
-        // ---------- Renderer ----------
-        const scene = new THREE.Scene();
-        const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
-        const renderer = new THREE.WebGLRenderer({ antialias: false });
-        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-        renderer.setSize(window.innerWidth, window.innerHeight);
-        document.body.appendChild(renderer.domElement);
+      if (uView < 0.5) col = mix(src, col, uMix);
+      if (uView > 2.5) {
+        col = vUv.x < uSplit ? src : col;
+        if (abs(vUv.x - uSplit) < 0.0015) col = vec3(1.0);
+      }
+      gl_FragColor = vec4(col, 1.0);
+    }`
+});
+scene.add(new THREE.Mesh(new THREE.PlaneGeometry(2, 2), material));
 
-        const videoTexture = new THREE.VideoTexture(video);
-        videoTexture.minFilter = THREE.LinearFilter;
-        videoTexture.magFilter = THREE.LinearFilter;
+// ---------------------------------------------------------------- sources
+const video = Object.assign(document.createElement('video'), { muted: true, playsInline: true, loop: true });
+const sensorVideo = Object.assign(document.createElement('video'), { muted: true, playsInline: true });
+const videoTex = makeTex(new THREE.VideoTexture(video));
+// Depth streams keep their 16-bit precision only when uploaded to a float texture.
+const sensorTex = makeTex(new THREE.VideoTexture(sensorVideo));
+sensorTex.format = THREE.RedFormat;
+sensorTex.type = THREE.HalfFloatType;
+sensorTex.internalFormat = 'R16F';
+let imageTex = null;
 
-        // One persistent depth canvas + texture; updated in place (no per-frame allocation).
-        const depthCanvas = document.createElement('canvas');
-        depthCanvas.width = DEPTH_SIZE;
-        depthCanvas.height = DEPTH_SIZE;
-        const depthCtx = depthCanvas.getContext('2d');
-        depthCtx.fillStyle = '#000';
-        depthCtx.fillRect(0, 0, DEPTH_SIZE, DEPTH_SIZE);
-        const depthTexture = new THREE.CanvasTexture(depthCanvas);
-        depthTexture.minFilter = THREE.LinearFilter;
-        depthTexture.magFilter = THREE.LinearFilter;
+const src = { kind: null, el: null, w: 0, h: 0, isDepth: false };  // kind: camera | video | image | sensor
+let stream = null, fileUrl = null;
 
-        const material = new THREE.ShaderMaterial({
-            uniforms: {
-                tDiffuse: { value: videoTexture },
-                tDepth: { value: depthTexture },
-                uMode: { value: 1.0 },
-                uTime: { value: 0.0 },
-                uUvScale: { value: new THREE.Vector2(1, 1) },
-                uUvOffset: { value: new THREE.Vector2(0, 0) }
-            },
-            vertexShader: `
-                varying vec2 vUv;
-                void main() {
-                    vUv = uv;
-                    gl_Position = vec4(position, 1.0);
-                }
-            `,
-            fragmentShader: `
-                uniform sampler2D tDiffuse;
-                uniform sampler2D tDepth;
-                uniform float uMode;
-                uniform float uTime;
-                uniform vec2 uUvScale;
-                uniform vec2 uUvOffset;
-                varying vec2 vUv;
+function stopStreams() {
+  stream?.getTracks().forEach(t => t.stop());
+  stream = null;
+  video.srcObject = null;
+  sensorVideo.srcObject = null;
+}
 
-                // Screen UV -> video UV: "cover" fit, mirrored like a selfie camera.
-                vec2 toVideo(vec2 uv) {
-                    vec2 v = uv * uUvScale + uUvOffset;
-                    v.x = 1.0 - v.x;
-                    return clamp(v, 0.0, 1.0);
-                }
+function waitMeta(v) {
+  return new Promise((resolve, reject) => {
+    if (v.readyState >= 1) return resolve();
+    v.addEventListener('loadedmetadata', resolve, { once: true });
+    v.addEventListener('error', () => reject(new Error('Could not open video')), { once: true });
+  });
+}
 
-                vec3 thermalGradient(float t) {
-                    vec3 blue = vec3(0.0, 0.0, 1.0);
-                    vec3 red = vec3(1.0, 0.0, 0.0);
-                    vec3 yellow = vec3(1.0, 1.0, 0.0);
-                    vec3 color = mix(blue, red, smoothstep(0.0, 0.5, t));
-                    return mix(color, yellow, smoothstep(0.5, 1.0, t));
-                }
+function setSource(kind, el, w, h, isDepth = false) {
+  Object.assign(src, { kind, el, w, h, isDepth });
+  if (kind === 'image') {
+    imageTex?.dispose();
+    imageTex = makeTex(new THREE.Texture(el));
+    imageTex.needsUpdate = true;
+    uniforms.tSource.value = imageTex;
+  } else if (kind === 'sensor') {
+    uniforms.tSource.value = blankTex;
+    uniforms.tSensor.value = sensorTex;
+  } else {
+    uniforms.tSource.value = videoTex;
+  }
+  uniforms.uDepthMode.value = kind === 'sensor' ? 1 : isDepth ? 2 : 0;
+  uniforms.uHasDepth.value = (kind === 'sensor' || isDepth) ? 1 : 0;
+  if (kind === 'sensor' || isDepth) uniforms.uDepthTexel.value.set(1 / w, 1 / h);
+  S.mirror = kind === 'camera' || kind === 'sensor';
+  resetDepth();
+  sizeOutput();
+  syncUI();
+  const what = { camera: 'Webcam', video: 'Video', image: 'Image', sensor: 'Depth sensor' }[kind];
+  $('sourceInfo').textContent = `${what}${isDepth ? ' (depth map)' : ''} · ${w}×${h}`;
+}
 
-                void main() {
-                    if (uMode < 0.5) {
-                        // 0: Thermal Depth
-                        float depth = texture2D(tDepth, toVideo(vUv)).r;
-                        gl_FragColor = vec4(thermalGradient(depth), 1.0);
-                        return;
-                    }
+async function listCameras() {
+  try {
+    const devices = (await navigator.mediaDevices.enumerateDevices()).filter(d => d.kind === 'videoinput');
+    const sel = $('camSelect');
+    const prev = sel.value;
+    sel.innerHTML = '';
+    devices.forEach((d, i) => sel.add(new Option(d.label || `Camera ${i + 1}`, d.deviceId)));
+    if (prev) sel.value = prev;
+    sel.hidden = devices.length < 2;
+    return devices;
+  } catch { return []; }
+}
 
-                    vec2 uv = vUv;
-                    vec3 tint = vec3(0.0);
+const DEPTH_LABEL = /depth|realsense|orbbec|astra|kinect|femto|tof|lidar|structure/i;
 
-                    if (uMode < 1.5) {
-                        // 1: Fluted Glass — each vertical rib acts as a small cylindrical lens.
-                        float columns = 25.0;
-                        float local = fract(uv.x * columns);           // 0..1 inside the rib
-                        float centre = (floor(uv.x * columns) + 0.5) / columns;
-                        float lens = (local - 0.5) * 2.0;               // -1..1
-                        float bend = lens * (0.6 + 0.4 * abs(lens));    // stronger at rib edges
-                        uv.x = centre + bend * (0.5 / columns) * 1.8;
-                        uv.y += sin(uTime * 2.0 + centre * 6.2831) * 0.004;
-                        tint = vec3(0.2, 0.4, 0.9) * vUv.y * 0.15 + vec3(0.06) * (1.0 - abs(lens));
-                    } else if (uMode < 2.5) {
-                        // 2: Wave/Ripple Refraction
-                        uv = vec2(
-                            uv.x + sin(uv.y * 15.0 + uTime * 3.0) * 0.03,
-                            uv.y + cos(uv.x * 15.0 + uTime * 2.0) * 0.03
-                        );
-                        tint = vec3(0.8, 0.2, 0.6) * vUv.x * 0.3;
-                    } else if (uMode < 3.5) {
-                        // 3: Pixel Mosaic Refraction (cell centres, not corners)
-                        float pixels = 40.0;
-                        uv = (floor(uv * pixels) + 0.5) / pixels;
-                        tint = vec3(0.1, 0.8, 0.5) * 0.2;
-                    }
-                    // 4: Base camera — untouched.
+async function useCamera(deviceId) {
+  if (!navigator.mediaDevices?.getUserMedia) throw new Error('Camera API unavailable — open the page over https:// or http://localhost.');
+  setStatus('Starting camera…');
+  stopStreams();
+  const video_c = deviceId ? { deviceId: { exact: deviceId } } : { facingMode: 'user' };
+  stream = await navigator.mediaDevices.getUserMedia({ video: { ...video_c, width: { ideal: 1280 }, height: { ideal: 720 } }, audio: false });
+  video.removeAttribute('src');
+  video.srcObject = stream;
+  await waitMeta(video);
+  await video.play().catch(() => {});
+  setSource('camera', video, video.videoWidth, video.videoHeight);
+  setStatus(est ? '' : statusEl.textContent);
+  const devices = await listCameras();
+  const track = stream.getVideoTracks()[0];
+  if (track) $('camSelect').value = track.getSettings().deviceId || $('camSelect').value;
+  $('btnSensor').title = devices.some(d => DEPTH_LABEL.test(d.label))
+    ? 'Depth sensor detected — click to use it' : $('btnSensor').title;
+}
 
-                    vec3 baseColor = texture2D(tDiffuse, toVideo(uv)).rgb;
-                    gl_FragColor = vec4(baseColor + tint, 1.0);
-                }
-            `
+async function useSensor() {
+  if (!navigator.mediaDevices?.getUserMedia) throw new Error('Camera API unavailable.');
+  setStatus('Looking for a depth sensor…');
+  let s = null;
+  const isDepthTrack = (t) => !!t && (t.getSettings?.().videoKind === 'depth' || DEPTH_LABEL.test(t.label));
+  // 1) Chrome's depth-stream constraint (RealSense and similar).
+  //    Browsers that don't know the constraint silently return a normal camera, so verify the track.
+  try {
+    s = await navigator.mediaDevices.getUserMedia({ video: { videoKind: { exact: 'depth' } }, audio: false });
+    if (!isDepthTrack(s.getVideoTracks()[0])) { s.getTracks().forEach(t => t.stop()); s = null; }
+  } catch { s = null; }
+  // 2) Fall back to a camera whose name says it's a depth device
+  if (!s) {
+    const devices = await listCameras();
+    const dev = devices.find(d => DEPTH_LABEL.test(d.label) && !/rgb|color|colour/i.test(d.label));
+    if (dev) { try { s = await navigator.mediaDevices.getUserMedia({ video: { deviceId: { exact: dev.deviceId } }, audio: false }); } catch {} }
+  }
+  if (!s) {
+    throw new Error('No depth sensor found.\nWorks with USB depth cameras (Intel RealSense, Orbbec, Kinect-type) in Chrome. iPhone LiDAR / Face ID and Windows Hello IR are not exposed to browsers — record on the device and use "Open depth map" instead.');
+  }
+  stopStreams();
+  stream = s;
+  sensorVideo.srcObject = s;
+  await waitMeta(sensorVideo);
+  await sensorVideo.play().catch(() => {});
+  setSource('sensor', sensorVideo, sensorVideo.videoWidth, sensorVideo.videoHeight);
+  setStatus('');
+}
+
+async function openFile(file, isDepth) {
+  if (!file) return;
+  if (fileUrl) URL.revokeObjectURL(fileUrl);
+  fileUrl = URL.createObjectURL(file);
+  try {
+    if (file.type.startsWith('image/')) {
+      const img = new Image();
+      img.src = fileUrl;
+      await img.decode();
+      stopStreams();
+      video.pause();
+      setSource('image', img, img.naturalWidth, img.naturalHeight, isDepth);
+    } else if (file.type.startsWith('video/')) {
+      stopStreams();
+      video.src = fileUrl;
+      await waitMeta(video);
+      await video.play().catch(() => {});
+      setSource('video', video, video.videoWidth, video.videoHeight, isDepth);
+    } else {
+      throw new Error('Unsupported file type');
+    }
+    if (est || isDepth) setStatus('');
+  } catch (e) {
+    setStatus(`Could not open file: ${e.message}`, true);
+  }
+}
+
+// ---------------------------------------------------------------- output size
+function sizeOutput() {
+  if (!src.w) return;
+  const scale = Math.min(1, 1920 / Math.max(src.w, src.h));
+  renderer.setSize(Math.round(src.w * scale), Math.round(src.h * scale), false);
+  fitCanvas();
+}
+function fitCanvas() {
+  const c = renderer.domElement;
+  const r = stage.getBoundingClientRect();
+  const s = Math.min(r.width / c.width, r.height / c.height);
+  c.style.width = `${Math.floor(c.width * s)}px`;
+  c.style.height = `${Math.floor(c.height * s)}px`;
+}
+new ResizeObserver(fitCanvas).observe(stage);
+
+// ---------------------------------------------------------------- AI depth
+let tf = null, est = null, estKey = '', loadToken = 0, activeDevice = '', depthFps = 0, dirty = true;
+let depthTex = null, dW = 0, dH = 0, norm = null, fresh = true;
+const range = { lo: 0, hi: 1, init: false };
+const inputCanvas = document.createElement('canvas');
+const inputCtx = inputCanvas.getContext('2d', { willReadFrequently: true });
+
+function resetDepth() {
+  range.init = false;
+  fresh = true;
+  dirty = true;
+  if (uniforms.uDepthMode.value === 0) uniforms.uHasDepth.value = 0;
+}
+
+async function loadModel() {
+  const key = `${S.model}|${S.backend}`;
+  if (key === estKey && est) return;
+  const token = ++loadToken;
+  const prev = est;
+  est = null;
+  estKey = '';
+  updateModelInfo();
+  try {
+    if (!tf) {
+      setStatus('Loading depth library…');
+      tf = await import(TRANSFORMERS_URL);
+      tf.env.allowLocalModels = false;
+    }
+    const progress = {};
+    const progress_callback = (p) => {
+      if (token !== loadToken || p.status !== 'progress' || !p.total) return;
+      progress[p.file] = [p.loaded, p.total];
+      let l = 0, t = 0;
+      for (const [a, b] of Object.values(progress)) { l += a; t += b; }
+      setStatus(`Downloading ${S.model} model… ${Math.round(l / 1e6)} / ${Math.round(t / 1e6)} MB`);
+    };
+    const order = S.backend === 'auto' ? (navigator.gpu ? ['webgpu', 'wasm'] : ['wasm']) : [S.backend];
+    let lastErr;
+    for (const device of order) {
+      try {
+        setStatus(`Loading ${S.model} model (${device.toUpperCase()})…`);
+        const p = await tf.pipeline('depth-estimation', MODELS[S.model], {
+          device, dtype: device === 'webgpu' ? 'fp16' : 'q8', progress_callback
         });
+        if (token !== loadToken) { p.dispose?.(); return; }
+        prev?.dispose?.();
+        est = p; estKey = key; activeDevice = device; dirty = true;
+        setStatus('');
+        updateModelInfo();
+        return;
+      } catch (e) { lastErr = e; console.warn(`${device} failed:`, e); }
+    }
+    throw lastErr;
+  } catch (e) {
+    if (token === loadToken) setStatus(`Depth model failed to load: ${e?.message || e}`, true);
+  }
+}
 
-        scene.add(new THREE.Mesh(new THREE.PlaneGeometry(2, 2), material));
+function updateModelInfo() {
+  $('modelInfo').textContent = est
+    ? `${S.model === 'small' ? 'Small' : 'Base'} · ${activeDevice.toUpperCase()} · ${dW}×${dH} · ${depthFps.toFixed(1)} fps`
+    : 'Loading…';
+}
 
-        // Keep the video aspect correct regardless of window shape.
-        function updateCoverUv() {
-            const vw = video.videoWidth, vh = video.videoHeight;
-            if (!vw || !vh) return;
-            const screenAspect = window.innerWidth / window.innerHeight;
-            const videoAspect = vw / vh;
-            const s = material.uniforms.uUvScale.value;
-            const o = material.uniforms.uUvOffset.value;
-            if (screenAspect > videoAspect) {
-                s.set(1, videoAspect / screenAspect);
-            } else {
-                s.set(screenAspect / videoAspect, 1);
-            }
-            o.set((1 - s.x) / 2, (1 - s.y) / 2);
-        }
+function ensureDepthTex(w, h) {
+  if (depthTex && dW === w && dH === h) return;
+  depthTex?.dispose();
+  dW = w; dH = h;
+  const data = floatLinear ? new Float32Array(w * h) : new Uint16Array(w * h);
+  depthTex = makeTex(new THREE.DataTexture(data, w, h, THREE.RedFormat, floatLinear ? THREE.FloatType : THREE.HalfFloatType));
+  uniforms.tDepth.value = depthTex;
+  uniforms.uDepthTexel.value.set(1 / w, 1 / h);
+  norm = new Float32Array(w * h);
+  fresh = true;
+}
 
-        // ---------- UI ----------
-        function setMode(mode) {
-            material.uniforms.uMode.value = mode;
-            buttons.forEach(b => b.classList.toggle('active', Number(b.dataset.mode) === mode));
-        }
-        buttons.forEach(b => b.addEventListener('click', () => setMode(Number(b.dataset.mode))));
-        window.setMode = setMode;
-        setMode(1);
+function processDepth(tensor) {
+  if (tensor.type !== 'float32') tensor = tensor.to('float32');
+  const h = tensor.dims.at(-2), w = tensor.dims.at(-1), v = tensor.data, n = w * h;
+  ensureDepthTex(w, h);
 
-        // ---------- Render loop (starts immediately, independent of the model) ----------
-        const clock = new THREE.Clock();
-        function render() {
-            material.uniforms.uTime.value = clock.getElapsedTime();
-            renderer.render(scene, camera);
-            requestAnimationFrame(render);
-        }
-        render();
+  // Robust range: 1st/99th percentile of a sample.
+  if (S.auto || !range.init) {
+    const step = Math.max(1, Math.floor(n / 4096));
+    const sample = [];
+    for (let i = 0; i < n; i += step) sample.push(v[i]);
+    sample.sort((a, b) => a - b);
+    const lo = sample[Math.floor(sample.length * 0.01)];
+    const hi = sample[Math.floor(sample.length * 0.99)];
+    if (!range.init || src.kind === 'image') { range.lo = lo; range.hi = hi; range.init = true; }
+    else { range.lo += (lo - range.lo) * 0.2; range.hi += (hi - range.hi) * 0.2; }
+  }
+  const inv = 1 / Math.max(range.hi - range.lo, 1e-6);
+  const k = (fresh || src.kind === 'image') ? 0 : S.smooth;
+  for (let i = 0; i < n; i++) {
+    let d = (v[i] - range.lo) * inv;
+    d = d < 0 ? 0 : d > 1 ? 1 : d;
+    norm[i] = d + (norm[i] - d) * k;
+  }
+  fresh = false;
 
-        // ---------- Camera ----------
-        async function startCamera() {
-            if (!navigator.mediaDevices?.getUserMedia) {
-                throw new Error('Camera API unavailable — open the page over https:// or http://localhost.');
-            }
-            const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' }, audio: false });
-            video.srcObject = stream;
-            await new Promise(resolve => {
-                if (video.readyState >= 1) resolve();
-                else video.addEventListener('loadedmetadata', resolve, { once: true });
-            });
-            await video.play().catch(() => {});
-            updateCoverUv();
-        }
+  // Upload, flipping rows (texture row 0 = bottom of the image).
+  const out = depthTex.image.data;
+  for (let y = 0; y < h; y++) {
+    const s = y * w, d = (h - 1 - y) * w;
+    if (floatLinear) out.set(norm.subarray(s, s + w), d);
+    else for (let x = 0; x < w; x++) out[d + x] = THREE.DataUtils.toHalfFloat(norm[s + x]);
+  }
+  depthTex.needsUpdate = true;
+  uniforms.uHasDepth.value = 1;
+}
 
-        // ---------- Depth model (loads in the background) ----------
-        const inputCanvas = document.createElement('canvas');
-        inputCanvas.width = DEPTH_SIZE;
-        inputCanvas.height = DEPTH_SIZE;
-        const inputCtx = inputCanvas.getContext('2d', { willReadFrequently: true });
+async function depthLoop() {
+  while (true) {
+    const ai = src.kind && src.kind !== 'sensor' && !src.isDepth;
+    const want = ai && est && S.view !== 2 && src.w > 0 && (src.kind !== 'image' || dirty);
+    if (!want || (src.kind !== 'image' && video.readyState < 2)) { await sleep(60); continue; }
+    dirty = false;
+    const t0 = performance.now();
+    const myEst = est;
+    try {
+      const R = S.res;
+      const sc = R / Math.max(src.w, src.h);
+      const iw = Math.max(14, Math.round(src.w * sc)), ih = Math.max(14, Math.round(src.h * sc));
+      if (inputCanvas.width !== iw || inputCanvas.height !== ih) { inputCanvas.width = iw; inputCanvas.height = ih; }
+      inputCtx.drawImage(src.el, 0, 0, iw, ih);
+      const ip = myEst.processor?.image_processor ?? myEst.processor;
+      if (ip) ip.size = { width: R, height: R };
+      const out = await myEst(tf.RawImage.fromCanvas(inputCanvas));
+      if (myEst !== est || !(src.kind && !src.isDepth && src.kind !== 'sensor')) continue;
+      processDepth(out.predicted_depth);
+      const dt = (performance.now() - t0) / 1000;
+      depthFps = depthFps ? depthFps * 0.8 + (1 / dt) * 0.2 : 1 / dt;
+      updateModelInfo();
+    } catch (e) {
+      console.error('Depth estimation error:', e);
+      setStatus(`Depth error: ${e?.message || e}`, true);
+      await sleep(500);
+    }
+  }
+}
 
-        async function loadEstimator() {
-            const tf = await import(TRANSFORMERS_URL);
-            const { pipeline, env } = tf;
-            RawImage = tf.RawImage;
-            env.allowLocalModels = false;
+// ---------------------------------------------------------------- gradient editor
+let stops = [];
+let selStop = 0;
+const gradBar = $('gradBar'), stopsEl = $('stops');
 
-            const progress = {};
-            const progress_callback = (p) => {
-                if (p.status === 'progress' && p.total) {
-                    progress[p.file] = [p.loaded, p.total];
-                    let loaded = 0, total = 0;
-                    for (const [l, t] of Object.values(progress)) { loaded += l; total += t; }
-                    setStatus(`Downloading depth model… ${Math.round(loaded / 1e6)} / ${Math.round(total / 1e6)} MB`);
-                }
-            };
+function loadPreset(name) {
+  S.preset = name;
+  const p = name === 'custom' ? S.customStops : PRESETS[name].stops;
+  stops = p.map(s => [s[0], s[1]]);
+  selStop = Math.min(selStop, stops.length - 1);
+  buildStops();
+  drawLut();
+}
 
-            if (navigator.gpu) {
-                try {
-                    const est = await pipeline('depth-estimation', MODEL_ID, { device: 'webgpu', dtype: 'fp16', progress_callback });
-                    return { est, backend: 'WebGPU' };
-                } catch (e) {
-                    console.warn('WebGPU unavailable, falling back to WASM:', e);
-                }
-            }
-            const est = await pipeline('depth-estimation', MODEL_ID, { device: 'wasm', dtype: 'q8', progress_callback });
-            return { est, backend: 'WASM' };
-        }
+function drawLut() {
+  const sorted = [...stops].sort((a, b) => a[0] - b[0]);
+  const g = lutCtx.createLinearGradient(0, 0, 256, 0);
+  sorted.forEach(([p, c]) => g.addColorStop(p, c));
+  lutCtx.fillStyle = g;
+  lutCtx.fillRect(0, 0, 256, 1);
+  lutTex.needsUpdate = true;
+  gradBar.style.background = `linear-gradient(90deg, ${sorted.map(([p, c]) => `${c} ${(p * 100).toFixed(2)}%`).join(', ')})`;
+  $('stopColor').value = stops[selStop][1];
+}
 
-        async function depthLoop(estimator) {
-            // Runs as fast as the model allows, decoupled from the 60fps render loop.
-            while (true) {
-                if (material.uniforms.uMode.value === 0 && video.readyState >= video.HAVE_CURRENT_DATA) {
-                    try {
-                        inputCtx.drawImage(video, 0, 0, DEPTH_SIZE, DEPTH_SIZE);
-                        const output = await estimator(RawImage.fromCanvas(inputCanvas));
-                        depthCtx.drawImage(output.depth.toCanvas(), 0, 0, DEPTH_SIZE, DEPTH_SIZE);
-                        depthTexture.needsUpdate = true;
-                    } catch (e) {
-                        console.error('Depth estimation error:', e);
-                        await new Promise(r => setTimeout(r, 500));
-                    }
-                } else {
-                    await new Promise(r => setTimeout(r, 100));
-                }
-            }
-        }
+function buildStops() {
+  stopsEl.innerHTML = '';
+  stops.forEach((s, i) => {
+    const h = document.createElement('div');
+    h.className = 'stop' + (i === selStop ? ' sel' : '');
+    h.style.left = `${s[0] * 100}%`;
+    h.style.background = s[1];
+    h.addEventListener('pointerdown', (e) => dragStop(e, i, h));
+    stopsEl.appendChild(h);
+  });
+  $('btnDelStop').disabled = stops.length <= 2;
+}
 
-        async function init() {
-            try {
-                await startCamera();
-            } catch (e) {
-                console.error(e);
-                setStatus(`Camera error: ${e.message || e.name}`, true);
-                return;
-            }
+function markCustom() {
+  S.preset = 'custom';
+  S.customStops = stops.map(s => [s[0], s[1]]);
+  $('preset').value = 'custom';
+  save();
+}
 
-            setStatus('Camera ready. Downloading depth model…');
-            try {
-                const { est, backend } = await loadEstimator();
-                thermalButton.disabled = false;
-                setStatus(`Depth model active (${backend}).`);
-                setTimeout(() => setStatus(''), 4000);
-                depthLoop(est);
-            } catch (e) {
-                console.error(e);
-                setStatus(`Depth model failed to load: ${e.message || e}. Refraction modes still work.`, true);
-            }
-        }
+function selectStop(i) {
+  selStop = i;
+  [...stopsEl.children].forEach((el, j) => el.classList.toggle('sel', j === i));
+  $('stopColor').value = stops[i][1];
+}
 
-        init();
+function dragStop(e, i, el) {
+  e.preventDefault();
+  selectStop(i);
+  el.setPointerCapture(e.pointerId);
+  const rect = stopsEl.getBoundingClientRect();
+  const move = (ev) => {
+    stops[i][0] = Math.min(1, Math.max(0, (ev.clientX - rect.left) / rect.width));
+    el.style.left = `${stops[i][0] * 100}%`;
+    drawLut();
+  };
+  const up = () => {
+    el.removeEventListener('pointermove', move);
+    el.removeEventListener('pointerup', up);
+    markCustom();
+  };
+  el.addEventListener('pointermove', move);
+  el.addEventListener('pointerup', up);
+}
 
-        window.addEventListener('resize', () => {
-            renderer.setSize(window.innerWidth, window.innerHeight);
-            updateCoverUv();
-        });
-    </script>
+gradBar.addEventListener('click', (e) => {
+  const r = gradBar.getBoundingClientRect();
+  const p = Math.min(1, Math.max(0, (e.clientX - r.left) / r.width));
+  const px = lutCtx.getImageData(Math.min(255, Math.round(p * 255)), 0, 1, 1).data;
+  const hex = '#' + [px[0], px[1], px[2]].map(v => v.toString(16).padStart(2, '0')).join('');
+  stops.push([p, hex]);
+  selStop = stops.length - 1;
+  buildStops(); drawLut(); markCustom();
+});
+$('stopColor').addEventListener('input', (e) => {
+  stops[selStop][1] = e.target.value;
+  stopsEl.children[selStop].style.background = e.target.value;
+  drawLut(); markCustom();
+});
+$('btnDelStop').addEventListener('click', () => {
+  if (stops.length <= 2) return;
+  stops.splice(selStop, 1);
+  selStop = Math.max(0, selStop - 1);
+  buildStops(); drawLut(); markCustom();
+});
+$('btnReverse').addEventListener('click', () => {
+  stops.forEach(s => { s[0] = 1 - s[0]; });
+  buildStops(); drawLut(); markCustom();
+});
+Object.entries(PRESETS).forEach(([k, p]) => $('preset').add(new Option(p.label, k)));
+$('preset').addEventListener('change', (e) => { loadPreset(e.target.value); save(); });
+
+// ---------------------------------------------------------------- controls
+const FORMAT = {
+  mix: v => `${Math.round(v * 100)}%`, split: v => `${Math.round(v * 100)}%`,
+  res: v => `${v}px`, far: v => v.toFixed(3), near: v => v.toFixed(3), gamma: v => v.toFixed(2),
+  smooth: v => v ? `${Math.round(v * 100)}%` : 'off', blur: v => v ? v.toFixed(1) : 'off',
+  steps: v => v > 1 ? v : 'off', contours: v => v || 'off', contourOpacity: v => `${Math.round(v * 100)}%`,
+  sNear: v => `${v.toFixed(2)} m`, sFar: v => `${v.toFixed(2)} m`
+};
+
+document.querySelectorAll('input[type=range][data-key]').forEach(inp => {
+  const key = inp.dataset.key;
+  const span = inp.parentElement.querySelector('label span');
+  inp.addEventListener('input', () => {
+    S[key] = Number(inp.value);
+    if (key === 'near' && S.near <= S.far) S.far = Math.max(0, S.near - 0.001);
+    if (key === 'far' && S.far >= S.near) S.near = Math.min(1, S.far + 0.001);
+    if (key === 'sNear' && S.sNear >= S.sFar) S.sFar = S.sNear + 0.05;
+    if (key === 'sFar' && S.sFar <= S.sNear) S.sNear = Math.max(0.1, S.sFar - 0.05);
+    if (key === 'res') dirty = true;
+    syncUI(); save();
+  });
+  inp._span = span;
+});
+document.querySelectorAll('input[type=checkbox][data-key]').forEach(inp => {
+  inp.addEventListener('change', () => {
+    S[inp.dataset.key] = inp.checked;
+    if (inp.dataset.key === 'auto') { if (S.auto) range.init = false; dirty = true; }
+    syncUI(); save();
+  });
+});
+$('mirror').addEventListener('change', (e) => { S.mirror = e.target.checked; syncUI(); });
+
+$('viewSeg').addEventListener('click', (e) => {
+  const b = e.target.closest('button[data-view]');
+  if (!b) return;
+  S.view = Number(b.dataset.view);
+  dirty = true;
+  syncUI(); save();
+});
+$('model').addEventListener('change', (e) => { S.model = e.target.value; save(); loadModel(); });
+$('backend').addEventListener('change', (e) => { S.backend = e.target.value; save(); loadModel(); });
+$('sUnits').addEventListener('change', (e) => { S.sUnits = Number(e.target.value); syncUI(); save(); });
+
+function syncUI() {
+  document.querySelectorAll('input[type=range][data-key]').forEach(inp => {
+    const k = inp.dataset.key;
+    inp.value = S[k];
+    if (inp._span) inp._span.textContent = FORMAT[k] ? FORMAT[k](S[k]) : S[k];
+  });
+  document.querySelectorAll('input[type=checkbox][data-key]').forEach(inp => { inp.checked = !!S[inp.dataset.key]; });
+  $('mirror').checked = S.mirror;
+  $('model').value = S.model;
+  $('backend').value = S.backend;
+  $('sUnits').value = String(S.sUnits);
+  [...$('viewSeg').children].forEach(b => b.classList.toggle('on', Number(b.dataset.view) === S.view));
+  document.querySelectorAll('[data-show-view]').forEach(el => { el.hidden = Number(el.dataset.showView) !== S.view; });
+
+  const isSensor = src.kind === 'sensor';
+  const isAI = !isSensor && !src.isDepth;
+  $('secModel').hidden = !isAI;
+  $('secSensor').hidden = !isSensor;
+  $('autoWrap').hidden = $('autoHint').hidden = $('smoothCtl').hidden = !isAI;
+  $('btnPause').hidden = !(src.kind === 'video' || src.kind === 'camera');
+  $('btnPause').textContent = video.paused ? 'Play' : 'Pause';
+  $('btnCam').classList.toggle('on', src.kind === 'camera');
+  $('btnSensor').classList.toggle('on', isSensor);
+
+  const u = uniforms;
+  u.uView.value = S.view; u.uMix.value = S.mix; u.uSplit.value = S.split;
+  u.uMirror.value = S.mirror ? 1 : 0; u.uInvert.value = S.invert ? 1 : 0;
+  u.uNear.value = S.near; u.uFar.value = S.far; u.uGamma.value = S.gamma;
+  u.uSteps.value = S.steps; u.uBlur.value = S.blur;
+  u.uContours.value = S.contours; u.uContourOpacity.value = S.contourOpacity;
+  u.uSensorNear.value = S.sNear; u.uSensorFar.value = S.sFar;
+  u.uSensorScale.value = 65.535 * S.sUnits;
+}
+
+// ---------------------------------------------------------------- source buttons
+$('btnCam').addEventListener('click', () => useCamera($('camSelect').value || undefined).catch(e => setStatus(`Camera error: ${e.message || e.name}`, true)));
+$('camSelect').addEventListener('change', (e) => useCamera(e.target.value).catch(err => setStatus(`Camera error: ${err.message || err.name}`, true)));
+$('btnSensor').addEventListener('click', () => useSensor().catch(e => setStatus(e.message, true)));
+let fileAsDepth = false;
+$('btnFile').addEventListener('click', () => { fileAsDepth = false; $('file').click(); });
+$('btnDepthFile').addEventListener('click', () => { fileAsDepth = true; $('file').click(); });
+$('file').addEventListener('change', (e) => { openFile(e.target.files[0], fileAsDepth); e.target.value = ''; });
+$('btnPause').addEventListener('click', () => { video.paused ? video.play() : video.pause(); syncUI(); });
+
+stage.addEventListener('dragover', (e) => { e.preventDefault(); stage.classList.add('dragging'); });
+stage.addEventListener('dragleave', () => stage.classList.remove('dragging'));
+stage.addEventListener('drop', (e) => {
+  e.preventDefault();
+  stage.classList.remove('dragging');
+  openFile(e.dataTransfer.files[0], false);
+});
+
+// ---------------------------------------------------------------- export
+const stamp = () => new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+function download(blob, name) {
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = name;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+}
+
+$('btnPng').addEventListener('click', () => {
+  renderer.render(scene, cam);
+  renderer.domElement.toBlob(b => b && download(b, `heatmap-${stamp()}.png`), 'image/png');
+});
+
+const CRC = (() => { const t = new Uint32Array(256); for (let n = 0; n < 256; n++) { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1; t[n] = c >>> 0; } return t; })();
+function crc32(b) { let c = 0xffffffff; for (let i = 0; i < b.length; i++) c = CRC[(c ^ b[i]) & 255] ^ (c >>> 8); return (c ^ 0xffffffff) >>> 0; }
+function pngChunk(type, data) {
+  const out = new Uint8Array(12 + data.length), dv = new DataView(out.buffer);
+  dv.setUint32(0, data.length);
+  for (let i = 0; i < 4; i++) out[4 + i] = type.charCodeAt(i);
+  out.set(data, 8);
+  dv.setUint32(8 + data.length, crc32(out.subarray(4, 8 + data.length)));
+  return out;
+}
+async function encodePng16(gray, w, h) {
+  const raw = new Uint8Array(h * (1 + w * 2));
+  let o = 0;
+  for (let y = 0; y < h; y++) {
+    raw[o++] = 0;
+    for (let x = 0; x < w; x++) { const v = gray[y * w + x]; raw[o++] = v >> 8; raw[o++] = v & 255; }
+  }
+  const z = new Uint8Array(await new Response(new Blob([raw]).stream().pipeThrough(new CompressionStream('deflate'))).arrayBuffer());
+  const ihdr = new Uint8Array(13), dv = new DataView(ihdr.buffer);
+  dv.setUint32(0, w); dv.setUint32(4, h); ihdr[8] = 16; ihdr[9] = 0;
+  return new Blob([new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10]), pngChunk('IHDR', ihdr), pngChunk('IDAT', z), pngChunk('IEND', new Uint8Array(0))], { type: 'image/png' });
+}
+
+$('btnDepth16').addEventListener('click', async () => {
+  if (!uniforms.uHasDepth.value) return setStatus('No depth yet.', true);
+  if (!floatTarget) return setStatus('16-bit export needs float render targets, which this GPU/browser lacks.', true);
+  const c = renderer.domElement, w = c.width, h = c.height;
+  const rt = new THREE.WebGLRenderTarget(w, h, { type: THREE.FloatType, format: THREE.RGBAFormat, depthBuffer: false });
+  uniforms.uOutput.value = 1;
+  renderer.setRenderTarget(rt);
+  renderer.render(scene, cam);
+  const px = new Float32Array(w * h * 4);
+  renderer.readRenderTargetPixels(rt, 0, 0, w, h, px);
+  renderer.setRenderTarget(null);
+  uniforms.uOutput.value = 0;
+  rt.dispose();
+  const gray = new Uint16Array(w * h);
+  for (let y = 0; y < h; y++) {
+    const sy = h - 1 - y;    // GL reads bottom-up
+    for (let x = 0; x < w; x++) gray[y * w + x] = Math.round(Math.min(1, Math.max(0, px[(sy * w + x) * 4])) * 65535);
+  }
+  download(await encodePng16(gray, w, h), `depth16-${stamp()}.png`);
+});
+
+let recorder = null;
+$('btnRec').addEventListener('click', () => {
+  const btn = $('btnRec');
+  if (recorder) { recorder.stop(); return; }
+  const types = ['video/mp4;codecs=avc1.640028', 'video/mp4', 'video/webm;codecs=vp9', 'video/webm'];
+  const mimeType = types.find(t => window.MediaRecorder?.isTypeSupported(t));
+  if (!mimeType) return setStatus('Video recording is not supported in this browser.', true);
+  const chunks = [];
+  recorder = new MediaRecorder(renderer.domElement.captureStream(30), { mimeType, videoBitsPerSecond: 20e6 });
+  recorder.ondataavailable = (e) => e.data.size && chunks.push(e.data);
+  recorder.onstop = () => {
+    download(new Blob(chunks, { type: mimeType }), `heatmap-${stamp()}.${mimeType.includes('mp4') ? 'mp4' : 'webm'}`);
+    recorder = null;
+    btn.textContent = 'Record video';
+    btn.classList.remove('rec');
+  };
+  recorder.start(250);
+  btn.textContent = 'Stop recording';
+  btn.classList.add('rec');
+});
+
+// ---------------------------------------------------------------- go
+loadPreset(PRESETS[S.preset] ? S.preset : 'thermal');
+$('preset').value = S.preset;
+syncUI();
+
+(function render() {
+  renderer.render(scene, cam);
+  requestAnimationFrame(render);
+})();
+
+useCamera().catch(e => {
+  console.warn(e);
+  setStatus('No camera available — open an image or video, or drop one here.');
+});
+loadModel();
+depthLoop();
+</script>
 </body>
 </html>
